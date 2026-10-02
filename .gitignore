@@ -1,0 +1,6 @@
+.gradle/
+.tools/
+.idea/
+.codegraph/
+local.properties
+**/build/

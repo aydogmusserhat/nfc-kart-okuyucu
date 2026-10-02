@@ -1,0 +1,40 @@
+name: NFC APK oluştur
+
+'on':
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Projeyi al
+        uses: actions/checkout@v6
+      - name: Java 17 hazırla
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Gradle 8.9 hazırla
+        uses: gradle/actions/setup-gradle@017a9effdb900e5b5b2fddfb590a105619dca3c3
+        with:
+          gradle-version: '8.9'
+      - name: Android SDK bileşenlerini kontrol et
+        run: |
+          test -f settings.gradle || { echo 'Proje dosyaları deponun kökünde olmalı.'; exit 1; }
+          test -d "$ANDROID_HOME/platforms/android-35"
+          test -d "$ANDROID_HOME/build-tools/34.0.0"
+      - name: APK oluştur
+        run: gradle --no-daemon assembleDebug
+      - name: APK dosyasını indirmeye aç
+        uses: actions/upload-artifact@v4
+        with:
+          name: NFC-Kart-Okuyucu-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
