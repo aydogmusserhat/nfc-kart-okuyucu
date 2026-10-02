@@ -28,6 +28,14 @@ public final class Codec {
         return key;
     }
 
+    public static byte[] parseHex(String input) {
+        if (input == null || (input.length() & 1) != 0 || !input.matches("[0-9a-fA-F]*"))
+            throw new IllegalArgumentException("Geçersiz hexadecimal veri.");
+        byte[] bytes = new byte[input.length() / 2];
+        for (int i = 0; i < bytes.length; i++) bytes[i] = (byte) Integer.parseInt(input.substring(i * 2, i * 2 + 2), 16);
+        return bytes;
+    }
+
     public static String decodeText(byte[] payload) {
         if (payload.length == 0) throw new IllegalArgumentException("Boş NDEF metin kaydı.");
         int status = payload[0] & 255;

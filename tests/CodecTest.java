@@ -12,6 +12,11 @@ public final class CodecTest {
     public static void main(String[] args) {
         check(Codec.hex(new byte[]{0, (byte) 255, (byte) 128, 15}).equals("00FF800F"));
         check(Codec.hex(null).isEmpty());
+        check(Codec.hex(Codec.parseHex("0080Ff")).equals("0080FF"));
+        for (String invalid : new String[]{"0", "ZZ"}) {
+            try { Codec.parseHex(invalid); throw new AssertionError("Invalid hex accepted"); }
+            catch (IllegalArgumentException expected) {}
+        }
         check(Codec.hex(Codec.parseKey("01 23 45 67 89 ab")).equals("0123456789AB"));
         invalidKey(""); invalidKey("123"); invalidKey("GG23456789AB");
         byte[] text = "İçerik: asfalt".getBytes(StandardCharsets.UTF_8);

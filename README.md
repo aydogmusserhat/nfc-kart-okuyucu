@@ -43,7 +43,7 @@ Android Studio'da düzenlemek için proje klasörünü File → Open ile aç. Gr
 
 ## Doğrulama
 
-1.0 sürümü GitHub Actions üzerinde başarıyla APK olarak derlendi. 1.1 yazma sürümünün derleme sonucu ilgili Actions çalıştırmasından kontrol edilmelidir. Gerçek kartta okuma/yazma denemesi yapılmadı. Platformdan bağımsız Codec sınıfının hex dönüşümü, anahtar doğrulaması, UTF-8/UTF-16 NDEF metin çözümlemesi ve bozuk kayıt kontrolleri çalıştırıldı. Java kaynaklarının sözdizimi ve XML dosyaları ayrıca kontrol edildi. Yazma onayının kart kimliği, süre aşımı, tek kullanım ve iptal senaryoları ayrıca test edildi.
+1.0 sürümü GitHub Actions üzerinde başarıyla APK olarak derlendi. 1.1 yazma sürümü de GitHub Actions üzerinde başarıyla APK olarak derlendi. 1.2 sürümünün derleme sonucu ilgili Actions çalıştırmasında görülebilir. Gerçek kartta okuma/yazma denemesi yapılmadı. Platformdan bağımsız Codec sınıfının hex dönüşümü, anahtar doğrulaması, UTF-8/UTF-16 NDEF metin çözümlemesi ve bozuk kayıt kontrolleri çalıştırıldı. Java kaynaklarının sözdizimi ve XML dosyaları ayrıca kontrol edildi. Yazma onayının kart kimliği, süre aşımı, tek kullanım ve iptal senaryoları ayrıca test edildi.
 
 Telefon üzerinde kontrol et: NFC kapalı/açık, NDEF metin ve URL etiketi, NDEF içermeyen kart, geçerli/geçersiz Classic anahtarı, kartın erken uzaklaştırılması, uygulamanın arka plana alınması ve JSON kaydetme/iptal.
 
@@ -70,3 +70,17 @@ Yazma onayı tek kullanımlıktır; farklı UID, süre aşımı, manuel iptal ve
 NDEF yazmada kapasite ve salt okunurluk kontrol edilir; yazılan mesaj karttan yeniden okunup karşılaştırılır. İletişim kesilirse işlem otomatik tekrarlanmaz; kartın son durumu yeniden okunmalıdır. NDEF temizleme, belleğin fiziksel olarak güvenli silinmesi değildir. Formatlama uyumluluğu telefon ve kart üreticisine bağlıdır.
 
 https://developer.android.com/reference/android/nfc/tech/NdefFormatable
+
+## Otomatik kart analizi — sürüm 1.2
+
+Her okumada kartın algılanan ailesi, NDEF veri düzeni, okunabilen kayıt sayısı, bildirilen yazılabilirlik, formatlama desteği ve okunan Classic veri blokları özetlenir. Analiz ekranda ve JSON raporunda bulunur. ISO-DEP tek başına belirli bir ürün/üreticiyi tanımlamaz; kart ailesi ile üreticinin mali uygulama protokolü ayrı bilgiler olarak ele alınır.
+
+Bu sürüm üreticiye özgü bir dolum/bakiye entegrasyonu içermez. Otomatik teknik analiz, bakiye alanını veya yetkili dolum protokolünü keşfetmiş sayılmaz. Raporda `dolum_protokolu_dogrulandi` ve `bakiye_islemi_destekleniyor` alanları false kalır. Kart dump'ındaki rastgele sayılar bakiye olarak etiketlenmez. Üreticiye özgü bakiye işlemini eklemek için belgelenmiş veri şeması, yetkili işlem protokolü ve gerekli erişim bilgileri sağlanmalıdır.
+
+## Metin/web bağlantısı kopyalama — sürüm 1.2
+
+Kaynak etiketi okut, **Okunan etiketi kopyalama kaynağı seç** düğmesine dokun. Ardından farklı hedef etiketi normal şekilde okut ve **Seçilen mesajı okunan hedef etikete yaz** seçeneğini kullan. Hedef UID ve işlem açıklamasını onayladıktan sonra aynı hedefi 30 saniye içinde yeniden yaklaştır.
+
+Kaynak mesajın bütün kayıtları standart NDEF metin veya HTTP/HTTPS web bağlantısı türünde olmalıdır. Özel/bilinmeyen kayıt varsa mesajın tamamı kopyalama için reddedilir. Hedefteki mevcut NDEF mesajı değiştirilir. Hedef yazılabilirlik ve kapasite kontrolleri ile yazma sonrası doğrulama uygulanır.
+
+Bu, kart klonlama değildir: UID, anahtarlar, korumalı sektörler, dolum uygulaması ve bakiye kopyalanmaz. Uygulama kapanınca seçilen kopyalama kaynağı unutulur.

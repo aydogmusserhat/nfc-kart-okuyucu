@@ -36,7 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MainActivity extends Activity implements NfcAdapter.ReaderCallback {
     private NfcAdapter adapter;
-    private TextView status, output;
+    private TextView status, output, analysis;
     private Button save;
     private volatile boolean foreground;
     private final AtomicBoolean busy = new AtomicBoolean(false);
@@ -48,6 +48,9 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
     private String lastUid;
     private boolean lastHasNdef, lastCanFormat;
     private final CardWriteGate writeGate = new CardWriteGate();
+    private byte[] copiedMessage;
+    private String copiedSourceUid;
+    private TextView copyStatus;
     private static final int EXPORT = 10;
 
     private static final class ReadOptions {
@@ -73,6 +76,7 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
         title.setTypeface(null, Typeface.BOLD);
         label(layout, "Kartı telefonun arkasına tut. Okuma tamamlanana kadar sabit beklet.", 16);
         status = label(layout, "Hazırlanıyor…", 16);
+        analysis = label(layout, "Kart analizi, ilk okuma tamamlanınca burada gösterilecek.", 14);
         Button settings = button(layout, "NFC ayarlarını aç");
         settings.setOnClickListener(v -> {
             try { startActivity(new Intent(Settings.ACTION_NFC_SETTINGS)); }
@@ -131,6 +135,39 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
         button(layout, "Bekleyen yazma işlemini iptal et").setOnClickListener(v -> {
             writeGate.cancel(); status.setText("Yazma iptal edildi. Genel okuma etkin.");
         });
+        label(layout, "Metin ve bağlantı kayıtlarını başka etikete kopyala", 18);
+        copyStatus = label(layout, "Kaynak etiketi okut ve kaynağı seç. Ardından hedef etiketi normal şekilde okut.", 14);
+        button(layout, "Okunan etiketi kopyalama kaynağı seç").setOnClickListener(v -> {
+            try {
+                if (busy.get() || lastReport == null) throw new IllegalArgumentException("Önce kaynak okumasının tamamlanmasını bekle.");
+                JSONObject report = new JSONObject(lastReport);
+                if (report.has("yazma_islemi")) throw new IllegalArgumentException("Kaynak etiketi yeniden normal okuma ile okut.");
+                String hex = report.optString("ndef_mesaj_hex", "");
+                if (hex.isEmpty()) throw new IllegalArgumentException("Kaynakta okunabilen NDEF mesajı yok.");
+                NdefMessage message = new NdefMessage(Codec.parseHex(hex));
+                for (NdefRecord record : message.getRecords()) {
+                    boolean textRecord = record.getTnf() == NdefRecord.TNF_WELL_KNOWN && Arrays.equals(record.getType(), NdefRecord.RTD_TEXT);
+                    boolean uriRecord = record.getTnf() == NdefRecord.TNF_WELL_KNOWN && Arrays.equals(record.getType(), NdefRecord.RTD_URI);
+                    if (textRecord) Codec.decodeText(record.getPayload());
+                    else if (uriRecord) {
+                        android.net.Uri uri = record.toUri();
+                        if (uri == null || !("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
+                                || uri.getHost() == null || uri.getHost().isEmpty())
+                            throw new IllegalArgumentException("Yalnızca web bağlantısı ve metin kayıtları kopyalanabilir.");
+                    } else throw new IllegalArgumentException("Kaynak özel kayıt içeriyor. Yalnızca standart metin ve web bağlantısı mesajları kopyalanabilir.");
+                }
+                copiedMessage = message.toByteArray(); copiedSourceUid = report.getString("uid_hex");
+                copyStatus.setText("Kaynak seçildi: " + copiedSourceUid + ". Hedef etiketi normal şekilde okut, ardından hedefe yaz düğmesine dokun.");
+            } catch (Exception e) { copiedMessage = null; copiedSourceUid = null; toast(e.getMessage() == null ? "Kaynak mesaj alınamadı." : e.getMessage()); }
+        });
+        button(layout, "Seçilen mesajı okunan hedef etikete yaz").setOnClickListener(v -> {
+            try {
+                if (copiedMessage == null) throw new IllegalArgumentException("Önce kopyalama kaynağını seç.");
+                if (copiedSourceUid.equals(lastUid)) throw new IllegalArgumentException("Önce farklı hedef etiketi normal şekilde okut.");
+                confirmWrite(CardWriteGate.Mode.WRITE, new NdefMessage(copiedMessage),
+                    "Kaynak: " + copiedSourceUid + "\nMetin/web bağlantısı mesajı hedefteki NDEF mesajının yerine yazılacak.");
+            } catch (Exception e) { toast(e.getMessage() == null ? "Kopyalama başlatılamadı." : e.getMessage()); }
+        });
         save = button(layout, "Sonucu JSON olarak kaydet"); save.setEnabled(false);
         save.setOnClickListener(v -> {
             if (lastReport == null) return;
@@ -145,7 +182,11 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
         output.setTypeface(Typeface.MONOSPACE); output.setTextIsSelectable(true);
         if (state != null) {
             lastReport = state.getString("report"); pendingExport = state.getString("export");
-            if (lastReport != null) { output.setText(lastReport); save.setEnabled(true); }
+            if (lastReport != null) {
+                output.setText(lastReport); save.setEnabled(true);
+                try { analysis.setText(new JSONObject(lastReport).optString("kart_analizi", "Analiz için kartı yeniden okut.")); }
+                catch (Exception ignored) { analysis.setText("Analiz için kartı yeniden okut."); }
+            }
         }
     }
 
@@ -246,9 +287,19 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
                     writeCard(tag, report, writeRequest, scanGeneration);
                 else report.put("yazma_durum", "Yazma iptal edildi: kart farklı veya 30 saniyelik onay süresi doldu. Kart değiştirilmedi.");
             } else readClassic(tag, report, scanOptions);
+            JSONArray records = report.optJSONArray("ndef_kayitlar");
+            JSONArray blocks = report.optJSONArray("classic_bloklar");
+            Boolean writable = report.has("ndef_yazilabilir") ? report.getBoolean("ndef_yazilabilir") : null;
+            String assessment = CardAnalysis.summarize(tag.getTechList(), Ndef.get(tag) != null, writable,
+                records != null, NdefFormatable.get(tag) != null, records == null ? 0 : records.length(),
+                blocks == null ? 0 : blocks.length());
+            report.put("kart_analizi", assessment);
+            report.put("dolum_protokolu_dogrulandi", false);
+            report.put("bakiye_islemi_destekleniyor", false);
             String json = report.toString(2);
             runOnUiThread(() -> { if (foreground && generation == scanGeneration) {
                 lastReport = json; output.setText(json); save.setEnabled(true);
+                analysis.setText(assessment);
                 lastUid = Codec.hex(tag.getId()); lastHasNdef = Ndef.get(tag) != null;
                 lastCanFormat = NdefFormatable.get(tag) != null;
                 status.setText(writeRequest == null ? "Okuma tamamlandı. Ayrıntılar aşağıda." : "İşlem sonucu aşağıda. Doğrulamak için kartı yeniden okut.");
@@ -258,6 +309,7 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
                 status.setText("Okuma tamamlanamadı. Kartı uzaklaştırıp yeniden yaklaştır.");
                 output.setText("Yeni kartın raporu oluşturulamadı."); lastReport = null; save.setEnabled(false);
                 lastUid = null;
+                analysis.setText("Bu okumada kart analizi tamamlanamadı.");
             }});
         } finally { busy.set(false); }
     }
@@ -308,6 +360,7 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
             report.put("ndef_turu", ndef.getType()); report.put("ndef_kapasite_bayt", ndef.getMaxSize());
             report.put("ndef_yazilabilir", ndef.isWritable());
             NdefMessage message = ndef.getNdefMessage();
+            if (message != null) report.put("ndef_mesaj_hex", Codec.hex(message.toByteArray()));
             JSONArray records = new JSONArray();
             if (message != null) for (NdefRecord record : message.getRecords()) {
                 JSONObject item = new JSONObject().put("tnf", record.getTnf())
