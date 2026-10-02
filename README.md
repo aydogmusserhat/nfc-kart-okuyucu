@@ -10,6 +10,7 @@ Android 6.0+ ve NFC destekli gerçek telefon gerekir. APK, GitHub Actions ile ol
 - MIFARE Classic destekli telefon/kart birleşiminde, kullanıcının verdiği tek anahtar ile seçilen tek sektörü doğrulayıp veri bloklarını okur. Anahtar A/B seçilebilir. Anahtar ve sektör trailer bloğu rapora alınmaz.
 - Yazılabilir NDEF kartlara metin veya HTTP/HTTPS bağlantısı yazar. Mevcut NDEF içeriğini boş kayıtla değiştirebilir. NdefFormatable desteği olan, henüz NDEF biçiminde olmayan kartları NDEF biçimine dönüştürebilir.
 - Sonucu sistem dosya seçicisiyle JSON olarak kaydeder. Uygulamanın internet veya genel depolama izni yoktur.
+- Okunan UID, NDEF ham kayıt içeriği ve Classic veri bloklarını ASCII, UTF-8 ve işaretli/işaretsiz 8/16/32/64 bit tam sayılar olarak gösterir. Elle HEX girilerek de dönüşüm yapılabilir.
 
 ## Windows'ta APK oluştur
 
@@ -84,3 +85,19 @@ Kaynak etiketi okut, **Okunan etiketi kopyalama kaynağı seç** düğmesine dok
 Kaynak mesajın bütün kayıtları standart NDEF metin veya HTTP/HTTPS web bağlantısı türünde olmalıdır. Özel/bilinmeyen kayıt varsa mesajın tamamı kopyalama için reddedilir. Hedefteki mevcut NDEF mesajı değiştirilir. Hedef yazılabilirlik ve kapasite kontrolleri ile yazma sonrası doğrulama uygulanır.
 
 Bu, kart klonlama değildir: UID, anahtarlar, korumalı sektörler, dolum uygulaması ve bakiye kopyalanmaz. Uygulama kapanınca seçilen kopyalama kaynağı unutulur.
+
+## Baytları metin ve sayıya çevirme — sürüm 1.3
+
+Kart okunduğunda **Baytları metin ve sayıya çevir** bölümünde UID, okunabilen Classic veri blokları ve ilk 32 NDEF kayıt içeriği otomatik gösterilir. Aynı dönüşümler JSON raporundaki `bayt_cozumlemeleri` alanına eklenir. Erişim anahtarı bilinmeyen/okunamayan alanlar için veri üretilmez.
+
+- HEX ve ASCII: ilk 64 bayt. Yazdırılamayan ASCII baytları `\x00`, `\xFF` gibi kaçışlarla gösterilir; gerçek ters eğik çizgi `\\` olarak gösterilir.
+- UTF-8: tüm kaynak üzerinde sıkı kodlama kontrolü; geçersiz diziler metne dönüştürülmüş sayılmaz. İlk 64 Unicode karakter gösterilir. Kontrol karakterleri `\u0000` gibi görünür; sıfır baytları boş veri olarak gizlenmez.
+- 8 bit: baytların işaretli ve işaretsiz ondalık değerleri.
+- 16/32/64 bit: ilk 64 baytta, 0. konumdan başlayarak ardışık tam 2/4/8 baytlık gruplar. LE (düşük bayt önce) ve BE (yüksek bayt önce) ile iki işaret yorumu ayrı gösterilir. Eksik grup sıfırla tamamlanmaz. Farklı hizalamayı incelemek için istenen alanın HEX baytlarını elle gir.
+- 64 bit işaretsiz değerler dahil tam sayılar, JSON'da ondalık metin olarak tutulur; başka araçlarda kayan nokta yuvarlamasıyla bozulmaz.
+
+Örnek: `48 65 6C 6C 6F` ASCII/UTF-8 olarak `Hello`; `64 00` 16 bit LE olarak 100, BE olarak 25600 gösterir. **Girilen HEX verisini çözümle** alanı boşluk, satır sonu, iki nokta ve tire ayırıcılarıyla en fazla 256 bayt kabul eder. Elle giriş sonuçları kartın JSON raporuna eklenmez.
+
+Bu bölüm salt dönüşümdür; karta komut/yazma göndermez. Sayıların bakiye, tarih veya sayaç olduğu belirlenmez. NDEF ham içeriklerinde kayıt türüne ait başlık baytları da bulunabilir; standart NDEF metninin çözülmüş hali asıl kayıt raporundadır.
+
+1.3 dönüşüm testleri bilinen ASCII/Türkçe/emoji metinleri, bozuk UTF-8, sıfır/kontrol baytları, işaretli sayı sınırları, 64 bit maksimumu, bayt sırası, eksik gruplar ve önizleme sınırlarını kapsar. Gerçek telefonla ekran ve kart denemesi kullanıcı tarafından yapılmalıdır.

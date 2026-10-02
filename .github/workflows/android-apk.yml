@@ -32,10 +32,11 @@ jobs:
       - name: Veri ve yazma onayı testleri
         run: |
           mkdir -p "$RUNNER_TEMP/nfc-check"
-          javac -encoding UTF-8 -d "$RUNNER_TEMP/nfc-check" app/src/main/java/com/serhat/nfcreader/Codec.java app/src/main/java/com/serhat/nfcreader/CardWriteGate.java tests/CodecTest.java tests/CardWriteGateTest.java app/src/main/java/com/serhat/nfcreader/CardAnalysis.java tests/CardAnalysisTest.java
+          javac -encoding UTF-8 -d "$RUNNER_TEMP/nfc-check" app/src/main/java/com/serhat/nfcreader/Codec.java app/src/main/java/com/serhat/nfcreader/CardWriteGate.java tests/CodecTest.java tests/CardWriteGateTest.java app/src/main/java/com/serhat/nfcreader/CardAnalysis.java tests/CardAnalysisTest.java app/src/main/java/com/serhat/nfcreader/ByteDecoder.java tests/ByteDecoderTest.java
           java -cp "$RUNNER_TEMP/nfc-check" com.serhat.nfcreader.CodecTest
           java -cp "$RUNNER_TEMP/nfc-check" com.serhat.nfcreader.CardWriteGateTest
           java -cp "$RUNNER_TEMP/nfc-check" com.serhat.nfcreader.CardAnalysisTest
+          java -cp "$RUNNER_TEMP/nfc-check" com.serhat.nfcreader.ByteDecoderTest
       - name: APK oluştur
         run: gradle --no-daemon assembleDebug
       - name: APK dosyasını indirmeye aç
