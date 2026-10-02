@@ -29,6 +29,12 @@ jobs:
           test -f settings.gradle || { echo 'Proje dosyaları deponun kökünde olmalı.'; exit 1; }
           test -d "$ANDROID_HOME/platforms/android-35"
           test -d "$ANDROID_HOME/build-tools/34.0.0"
+      - name: Veri ve yazma onayı testleri
+        run: |
+          mkdir -p "$RUNNER_TEMP/nfc-check"
+          javac -encoding UTF-8 -d "$RUNNER_TEMP/nfc-check" app/src/main/java/com/serhat/nfcreader/Codec.java app/src/main/java/com/serhat/nfcreader/CardWriteGate.java tests/CodecTest.java tests/CardWriteGateTest.java
+          java -cp "$RUNNER_TEMP/nfc-check" com.serhat.nfcreader.CodecTest
+          java -cp "$RUNNER_TEMP/nfc-check" com.serhat.nfcreader.CardWriteGateTest
       - name: APK oluştur
         run: gradle --no-daemon assembleDebug
       - name: APK dosyasını indirmeye aç

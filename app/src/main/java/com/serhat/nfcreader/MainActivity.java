@@ -1,6 +1,7 @@
 package com.serhat.nfcreader;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -11,10 +12,12 @@ import android.nfc.Tag;
 import android.nfc.tech.IsoDep;
 import android.nfc.tech.MifareClassic;
 import android.nfc.tech.Ndef;
+import android.nfc.tech.NdefFormatable;
 import android.nfc.tech.NfcA;
 import android.nfc.tech.NfcV;
 import android.nfc.tech.TagTechnology;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.InputType;
 import android.widget.Button;
@@ -42,6 +45,9 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
     private volatile long generation;
     private volatile ReadOptions options;
     private String lastReport, pendingExport;
+    private String lastUid;
+    private boolean lastHasNdef, lastCanFormat;
+    private final CardWriteGate writeGate = new CardWriteGate();
     private static final int EXPORT = 10;
 
     private static final class ReadOptions {
@@ -97,6 +103,34 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
         });
         Button reset = button(layout, "Anahtarlı okumayı kapat");
         reset.setOnClickListener(v -> { options = null; key.setText(""); status.setText("Genel okuma etkin. Kartı yaklaştır."); });
+        label(layout, "NDEF yazma ve formatlama", 18);
+        label(layout, "Önce hedef kartı okut. Yazma mevcut NDEF kaydını değiştirir; formatlama kartın veri düzenini değiştirebilir.", 14);
+        EditText content = new EditText(this);
+        content.setHint("Yazılacak metin veya https:// bağlantısı"); layout.addView(content);
+        CheckBox uriMode = new CheckBox(this);
+        uriMode.setText("Bağlantı olarak yaz (HTTP/HTTPS)"); layout.addView(uriMode);
+        button(layout, "NDEF kaydı yaz").setOnClickListener(v -> {
+            try {
+                String text = content.getText().toString();
+                if (text.trim().isEmpty()) throw new IllegalArgumentException("Yazılacak içerik boş olamaz.");
+                NdefRecord record;
+                if (uriMode.isChecked()) {
+                    android.net.Uri uri = android.net.Uri.parse(text.trim());
+                    if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
+                            || uri.getHost() == null || uri.getHost().isEmpty())
+                        throw new IllegalArgumentException("Geçerli bir HTTP/HTTPS bağlantısı gir.");
+                    record = NdefRecord.createUri(uri);
+                } else record = NdefRecord.createTextRecord("tr", text);
+                confirmWrite(CardWriteGate.Mode.WRITE, new NdefMessage(new NdefRecord[]{record}), text);
+            } catch (IllegalArgumentException e) { toast(e.getMessage()); }
+        });
+        button(layout, "NDEF içeriğini temizle").setOnClickListener(v ->
+            confirmWrite(CardWriteGate.Mode.CLEAR, emptyMessage(), "Mevcut NDEF kaydı boş kayıtla değiştirilecek."));
+        button(layout, "NDEF biçiminde formatla").setOnClickListener(v ->
+            confirmWrite(CardWriteGate.Mode.FORMAT, emptyMessage(), "Kart NDEF biçimine dönüştürülecek; eski uygulama verileri kaybolabilir."));
+        button(layout, "Bekleyen yazma işlemini iptal et").setOnClickListener(v -> {
+            writeGate.cancel(); status.setText("Yazma iptal edildi. Genel okuma etkin.");
+        });
         save = button(layout, "Sonucu JSON olarak kaydet"); save.setEnabled(false);
         save.setOnClickListener(v -> {
             if (lastReport == null) return;
@@ -126,6 +160,29 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
     }
     private void toast(String text) { Toast.makeText(this, text, Toast.LENGTH_LONG).show(); }
 
+    private NdefMessage emptyMessage() {
+        return new NdefMessage(new NdefRecord[]{new NdefRecord(NdefRecord.TNF_EMPTY, new byte[0], new byte[0], new byte[0])});
+    }
+    private void confirmWrite(CardWriteGate.Mode mode, NdefMessage message, String preview) {
+        writeGate.cancel();
+        if (busy.get()) { toast("Önce mevcut okumanın tamamlanmasını bekle."); return; }
+        if (lastUid == null || lastUid.isEmpty()) { toast("Önce hedef kartı okut."); return; }
+        if (mode == CardWriteGate.Mode.FORMAT && (lastHasNdef || !lastCanFormat)) {
+            toast(lastHasNdef ? "Kart zaten NDEF biçiminde. İçeriği temizle seçeneğini kullan." : "Bu kart için NDEF formatlama desteklenmiyor."); return;
+        }
+        if (mode != CardWriteGate.Mode.FORMAT && !lastHasNdef) { toast("Bu kartta NDEF yazma desteği algılanmadı."); return; }
+        final String uid = lastUid;
+        String detail = preview.length() > 400 ? preview.substring(0, 400) + "…" : preview;
+        new AlertDialog.Builder(this).setTitle(mode == CardWriteGate.Mode.FORMAT ? "Formatlamayı onayla" : "Yazmayı onayla")
+            .setMessage("Hedef kart: " + uid + "\n\n" + detail + "\n\nOnaydan sonra aynı kartı 30 saniye içinde yeniden yaklaştır. Kartı işlem bitene kadar sabit tut.")
+            .setNegativeButton("Vazgeç", (dialog, which) -> writeGate.cancel())
+            .setPositiveButton("Onayla", (dialog, which) -> {
+                if (!foreground || busy.get()) { toast("Kart işlemi sürüyor; yeniden dene."); return; }
+                writeGate.arm(uid, mode, message.toByteArray(), SystemClock.elapsedRealtime());
+                status.setText("İşlem onaylandı. Aynı kartı uzaklaştırıp 30 saniye içinde yeniden yaklaştır.");
+            }).show();
+    }
+
     @Override protected void onResume() {
         super.onResume(); foreground = true; generation++;
         if (adapter == null) { status.setText("Bu telefonda NFC donanımı bulunamadı."); return; }
@@ -138,6 +195,7 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
     }
     @Override protected void onPause() {
         foreground = false; generation++;
+        writeGate.cancel();
         if (adapter != null) adapter.disableReaderMode(this);
         synchronized (connectionLock) {
             if (active != null) { try { active.close(); } catch (Exception ignored) {} active = null; }
@@ -165,6 +223,7 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
         if (!foreground || !busy.compareAndSet(false, true)) return;
         long scanGeneration = generation;
         ReadOptions scanOptions = options;
+        CardWriteGate.Request writeRequest = writeGate.consume();
         runOnUiThread(() -> { if (foreground && generation == scanGeneration) {
             status.setText("Okunuyor… Kartı sabit tut."); lastReport = null; save.setEnabled(false);
         }});
@@ -173,6 +232,7 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
             report.put("uid_hex", Codec.hex(tag.getId()));
             report.put("okuma_zamani_utc", new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.ROOT) {{ setTimeZone(java.util.TimeZone.getTimeZone("UTC")); }}.format(new java.util.Date()));
             report.put("teknolojiler", new JSONArray(Arrays.asList(tag.getTechList())));
+            report.put("ndef_formatlanabilir", NdefFormatable.get(tag) != null);
             report.put("not", "UID bakiye değildir. Ham verinin anlamı üreticinin veri düzenine bağlıdır.");
             NfcA a = NfcA.get(tag);
             if (a != null) report.put("nfc_a", new JSONObject().put("atqa_hex", Codec.hex(a.getAtqa())).put("sak", a.getSak() & 65535));
@@ -181,18 +241,63 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
             IsoDep dep = IsoDep.get(tag);
             if (dep != null) report.put("iso_dep", new JSONObject().put("historical_bytes_hex", Codec.hex(dep.getHistoricalBytes())).put("hi_layer_response_hex", Codec.hex(dep.getHiLayerResponse())));
             readNdef(tag, report);
-            readClassic(tag, report, scanOptions);
+            if (writeRequest != null) {
+                if (writeRequest.matches(Codec.hex(tag.getId()), SystemClock.elapsedRealtime()))
+                    writeCard(tag, report, writeRequest, scanGeneration);
+                else report.put("yazma_durum", "Yazma iptal edildi: kart farklı veya 30 saniyelik onay süresi doldu. Kart değiştirilmedi.");
+            } else readClassic(tag, report, scanOptions);
             String json = report.toString(2);
             runOnUiThread(() -> { if (foreground && generation == scanGeneration) {
                 lastReport = json; output.setText(json); save.setEnabled(true);
-                status.setText("Okuma tamamlandı. Ayrıntılar aşağıda.");
+                lastUid = Codec.hex(tag.getId()); lastHasNdef = Ndef.get(tag) != null;
+                lastCanFormat = NdefFormatable.get(tag) != null;
+                status.setText(writeRequest == null ? "Okuma tamamlandı. Ayrıntılar aşağıda." : "İşlem sonucu aşağıda. Doğrulamak için kartı yeniden okut.");
             }});
         } catch (Exception e) {
             runOnUiThread(() -> { if (foreground && generation == scanGeneration) {
                 status.setText("Okuma tamamlanamadı. Kartı uzaklaştırıp yeniden yaklaştır.");
                 output.setText("Yeni kartın raporu oluşturulamadı."); lastReport = null; save.setEnabled(false);
+                lastUid = null;
             }});
         } finally { busy.set(false); }
+    }
+
+    private void writeCard(Tag tag, JSONObject report, CardWriteGate.Request request, long scanGeneration) throws Exception {
+        report.put("yazma_islemi", request.mode.name());
+        NdefMessage message = new NdefMessage(request.message());
+        Ndef ndef = Ndef.get(tag);
+        boolean commandStarted = false;
+        TagTechnology connection = null;
+        try {
+            if (request.mode == CardWriteGate.Mode.FORMAT) {
+                if (ndef != null) { report.put("yazma_durum", "Kart zaten NDEF biçiminde; formatlama yapılmadı."); return; }
+                NdefFormatable formatable = NdefFormatable.get(tag);
+                if (formatable == null) { report.put("yazma_durum", "NDEF formatlama desteklenmiyor; kart değiştirilmedi."); return; }
+                connection = formatable; open(formatable);
+                if (!foreground || generation != scanGeneration) throw new java.io.IOException("İşlem iptal edildi.");
+                commandStarted = true; formatable.format(message);
+                report.put("yazma_durum", "NDEF formatlama çağrısı tamamlandı. Sonucu doğrulamak için kartı yeniden okut.");
+                report.put("yazma_dogrulandi", false);
+            } else {
+                if (ndef == null) { report.put("yazma_durum", "NDEF desteği yok; kart değiştirilmedi."); return; }
+                connection = ndef; open(ndef);
+                if (!ndef.isWritable()) { report.put("yazma_durum", "Kart salt okunur; kart değiştirilmedi."); return; }
+                if (message.toByteArray().length > ndef.getMaxSize()) { report.put("yazma_durum", "İçerik kart kapasitesini aşıyor; kart değiştirilmedi."); return; }
+                NdefMessage previous = ndef.getNdefMessage();
+                report.put("onceki_ndef_hex", previous == null ? "" : Codec.hex(previous.toByteArray()));
+                if (!foreground || generation != scanGeneration) throw new java.io.IOException("İşlem iptal edildi.");
+                commandStarted = true; ndef.writeNdefMessage(message);
+                NdefMessage verify = ndef.getNdefMessage();
+                boolean matches = verify != null && Arrays.equals(message.toByteArray(), verify.toByteArray());
+                report.put("yazma_dogrulandi", matches);
+                report.put("yazma_durum", matches ? "NDEF yazıldı ve karttan tekrar okunarak doğrulandı." : "Yazma çağrısı tamamlandı, ancak veri doğrulanamadı. Kartı yeniden okut.");
+            }
+        } catch (Exception e) {
+            report.put("yazma_dogrulandi", false);
+            report.put("yazma_durum", commandStarted ? "İşlem kesildi; kartın değişip değişmediği doğrulanamadı. Kartı yeniden okuyarak kontrol et. Otomatik tekrar yapılmadı." : "İşlem başlatılamadı; kart değiştirilmedi.");
+        } finally { if (connection != null) close(connection); }
+        // The main NDEF fields describe the scan before the mutation; distinguish them explicitly.
+        report.put("ndef_kayitlari_asamasi", "İşlem öncesi okuma");
     }
 
     private void readNdef(Tag tag, JSONObject report) throws Exception {
@@ -201,6 +306,7 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
         try {
             open(ndef);
             report.put("ndef_turu", ndef.getType()); report.put("ndef_kapasite_bayt", ndef.getMaxSize());
+            report.put("ndef_yazilabilir", ndef.isWritable());
             NdefMessage message = ndef.getNdefMessage();
             JSONArray records = new JSONArray();
             if (message != null) for (NdefRecord record : message.getRecords()) {

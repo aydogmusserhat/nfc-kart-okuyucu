@@ -1,6 +1,6 @@
 # NFC Kart Okuyucu — Android kaynak projesi
 
-Bu paket kaynak koddur; hazır APK içermez. Android 6.0+ ve NFC destekli gerçek telefon gerekir.
+Android 6.0+ ve NFC destekli gerçek telefon gerekir. APK, GitHub Actions ile oluşturulur; Actions çalıştırmasının Artifacts bölümünden indirilebilir. Online kurulum için ONLINE-KURULUM.md dosyasına bak.
 
 ## Yaptıkları
 
@@ -8,6 +8,7 @@ Bu paket kaynak koddur; hazır APK içermez. Android 6.0+ ve NFC destekli gerçe
 - NFC-A, NFC-V ve ISO-DEP kartların erişilebilir protokol bilgilerini gösterir.
 - NDEF mesajlarını okur; metin ve URI kayıtlarını çözümler, diğer kayıtların ham verisini hex olarak gösterir.
 - MIFARE Classic destekli telefon/kart birleşiminde, kullanıcının verdiği tek anahtar ile seçilen tek sektörü doğrulayıp veri bloklarını okur. Anahtar A/B seçilebilir. Anahtar ve sektör trailer bloğu rapora alınmaz.
+- Yazılabilir NDEF kartlara metin veya HTTP/HTTPS bağlantısı yazar. Mevcut NDEF içeriğini boş kayıtla değiştirebilir. NdefFormatable desteği olan, henüz NDEF biçiminde olmayan kartları NDEF biçimine dönüştürebilir.
 - Sonucu sistem dosya seçicisiyle JSON olarak kaydeder. Uygulamanın internet veya genel depolama izni yoktur.
 
 ## Windows'ta APK oluştur
@@ -34,7 +35,7 @@ Android Studio'da düzenlemek için proje klasörünü File → Open ile aç. Gr
 
 ## Kapsam ve sınırlar
 
-- Kart belleğine yazma, formatlama veya bakiye değiştirme işlevi bulunmaz. Anahtar tahmini yapılmaz.
+- Yazma ve formatlama yalnızca NDEF desteği üzerinden uygulanır. Dolum kartının özel bellek düzenini sıfırlama veya bakiyesini değiştirme bu sürümde bulunmaz. Bunun için kart tipi, veri düzeni ve dolum sisteminin yetkili işlem protokolü gerekir. Anahtar tahmini yapılmaz.
 - Korumalı DESFire/ISO-DEP uygulamalarının belleğini okumak için üreticinin uygulama kimliği, protokolü ve erişim anahtarlarıyla ek geliştirme gerekir. Bu sürüm o alanları okuyamaz.
 - NFC destekli her Android telefon MIFARE Classic okumayı desteklemek zorunda değildir. Donanım uyumsuzluğu uygulamayla giderilemez.
 - 125 kHz RFID kartlar telefon NFC'siyle okunamaz; uyumlu harici okuyucu gerekir.
@@ -42,7 +43,7 @@ Android Studio'da düzenlemek için proje klasörünü File → Open ile aç. Gr
 
 ## Doğrulama
 
-Bu ortamda Android SDK/Gradle bulunmadığından APK derlenmedi ve gerçek kartta denenmedi. Platformdan bağımsız Codec sınıfının hex dönüşümü, anahtar doğrulaması, UTF-8/UTF-16 NDEF metin çözümlemesi ve bozuk kayıt kontrolleri çalıştırıldı. Java kaynaklarının sözdizimi ve XML dosyaları ayrıca kontrol edildi.
+1.0 sürümü GitHub Actions üzerinde başarıyla APK olarak derlendi. 1.1 yazma sürümünün derleme sonucu ilgili Actions çalıştırmasından kontrol edilmelidir. Gerçek kartta okuma/yazma denemesi yapılmadı. Platformdan bağımsız Codec sınıfının hex dönüşümü, anahtar doğrulaması, UTF-8/UTF-16 NDEF metin çözümlemesi ve bozuk kayıt kontrolleri çalıştırıldı. Java kaynaklarının sözdizimi ve XML dosyaları ayrıca kontrol edildi. Yazma onayının kart kimliği, süre aşımı, tek kullanım ve iptal senaryoları ayrıca test edildi.
 
 Telefon üzerinde kontrol et: NFC kapalı/açık, NDEF metin ve URL etiketi, NDEF içermeyen kart, geçerli/geçersiz Classic anahtarı, kartın erken uzaklaştırılması, uygulamanın arka plana alınması ve JSON kaydetme/iptal.
 
@@ -54,3 +55,18 @@ AGP 8.7.3, Gradle 8.9, compileSdk 35, targetSdk 34, minSdk 23, Java 17. Framewor
 - https://developer.android.com/reference/android/nfc/tech/Ndef
 - https://developer.android.com/reference/android/nfc/tech/MifareClassic
 - https://developer.android.com/build/releases/agp-8-7-0-release-notes
+
+## Yazma ve formatlama — sürüm 1.1
+
+1. Hedef kartı önce normal şekilde okut.
+2. Metin/bağlantı için içeriği gir ve **NDEF kaydı yaz** seç. İçeriği boşaltmak için **NDEF içeriğini temizle** seç. Henüz NDEF biçiminde olmayan uyumlu kart için **NDEF biçiminde formatla** seç.
+3. Kart UID'sini ve işlem önizlemesini kontrol edip onayla. Aynı kartı 30 saniye içinde uzaklaştırıp tekrar yaklaştır.
+4. Kartı işlem sonuna kadar sabit tut. Yazma raporunda doğrulama sonucunu incele. Formatlama sonrası teknolojiler yeniden algılansın diye kartı tekrar okut.
+
+Yazma ve temizleme, önceki NDEF mesajının ham baytlarını işlem raporundaki `onceki_ndef_hex` alanına alır. Bu rapor tam bellek yedeği değildir. Formatlama, üreticiye özgü uygulama verilerini kaybettirebilir. Mevcut NDEF kaydını korumak istiyorsan yazmadan önce JSON raporunu kaydet. Formatlama için otomatik eski veri yedeği oluşturulmaz.
+
+Yazma onayı tek kullanımlıktır; farklı UID, süre aşımı, manuel iptal veya uygulamanın arka plana alınması onayı iptal eder. UID kartı hedeflemek içindir, kriptografik kimlik doğrulama değildir.
+
+NDEF yazmada kapasite ve salt okunurluk kontrol edilir; yazılan mesaj karttan yeniden okunup karşılaştırılır. İletişim kesilirse işlem otomatik tekrarlanmaz; kartın son durumu yeniden okunmalıdır. NDEF temizleme, belleğin fiziksel olarak güvenli silinmesi değildir. Formatlama uyumluluğu telefon ve kart üreticisine bağlıdır.
+
+https://developer.android.com/reference/android/nfc/tech/NdefFormatable
